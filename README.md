@@ -62,20 +62,37 @@ When a context with an active OTel span is attached via `.Context(ctx)`, `trace_
 
 ## Testing
 
-Unit tests use `MemSink`:
+Unit tests use `MemSink` — no external deps:
 
-```go
-sink := log.NewMemSink()
-telemetry.SetGlobalMetricSink(sink)
-// ... exercise code ...
-assert.Equal(t, float64(1), sink.Snapshot()["myservice_errors_total"])
+```bash
+go test -race ./...
 ```
 
-E2e tests run against [otel-front](https://github.com/mesaglio/otel-front) (started via Docker in `TestMain`):
+E2e tests use an **in-process OTLP gRPC sink** — no Docker, no sleep, precise assertions:
 
 ```bash
 cd e2e && go test -v -tags e2e -timeout 60s ./...
 ```
+
+### Manual verification with otel-front
+
+For human browsing of traces, logs, and metrics, start [otel-front](https://github.com/mesaglio/otel-front) and re-run with `E2E_OTEL_FRONT=1`:
+
+```bash
+# Terminal 1 — start otel-front
+docker run -p 8000:8000 -p 4317:4317 -p 4318:4318 ghcr.io/mesaglio/otel-front:latest
+
+# Terminal 2 — run e2e pointing at otel-front
+cd e2e && E2E_OTEL_FRONT=1 go test -v -tags e2e -timeout 90s ./...
+
+# Open http://localhost:8000 — traces, logs, and metrics from the test run
+```
+
+otel-front shows:
+- **Metrics** → `zia_quota_reserve_total`, `zia_quota_reserve_errors_total` with cluster labels
+- **Logs** → `reserve success`, `reserve failed` with trace correlation
+- **Traces** → `quota.Reserve` span, same trace_id as the log records
+
 
 ## License
 

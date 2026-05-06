@@ -41,7 +41,7 @@ type slogLogger struct {
 }
 
 func (l *slogLogger) Debug(msg string, kvs ...any) {
-	if l.level < telemetry.LevelDebug {
+	if l.level != telemetry.LevelNone && l.level < telemetry.LevelDebug {
 		return
 	}
 	l.sl.Debug(msg, l.args(kvs)...)
@@ -51,7 +51,7 @@ func (l *slogLogger) Info(msg string, kvs ...any) {
 	if l.metric != nil {
 		l.metric.RecordContext(l.ctx, 1) // fires before level check — unconditional
 	}
-	if l.level < telemetry.LevelInfo {
+	if l.level != telemetry.LevelNone && l.level < telemetry.LevelInfo {
 		return
 	}
 	l.sl.Info(msg, l.args(kvs)...)

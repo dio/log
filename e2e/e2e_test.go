@@ -1,21 +1,27 @@
 //go:build e2e
 
-// Package e2e tests the github.com/dio/log library against a real otel-front sink.
+// Package e2e tests github.com/dio/log against a real OTLP sink.
+//
+// By default, an in-process OTLP gRPC sink is used — no Docker required,
+// precise assertions (value, label, trace ID), no sleep.
+//
+// For human verification, set E2E_OTEL_FRONT=1 to additionally start otel-front
+// (via Docker) and route all telemetry there so you can browse it at
+// http://localhost:8000.
 //
 // Run:
 //
 //	cd e2e && go test -v -tags e2e -timeout 60s ./...
 //
-// otel-front is started automatically via Docker and torn down after the suite.
-// Set E2E_SKIP_DOCKER=1 to reuse an already-running instance on the default ports.
+// With otel-front UI:
+//
+//	cd e2e && E2E_OTEL_FRONT=1 go test -v -tags e2e -timeout 90s ./...
 package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -39,14 +45,8 @@ import (
 	ziolog "github.com/dio/log"
 )
 
-const (
-	otlpGRPCAddr = "localhost:4317"
-	apiAddr      = "http://localhost:8000"
-	containerName = "otel-front-e2e"
-)
-
 // ---------------------------------------------------------------------------
-// Metric declarations (same pattern as quotasvc)
+// Metric declarations
 // ---------------------------------------------------------------------------
 
 var (
@@ -66,28 +66,50 @@ func init() {
 var quotaLog = scope.Register("quotasvc", "Quota service operations")
 
 // ---------------------------------------------------------------------------
-// TestMain — start otel-front, wire OTel SDK, run suite, teardown.
+// Globals set in TestMain
 // ---------------------------------------------------------------------------
 
-var tracer trace.Tracer
-var tp    *sdktrace.TracerProvider
+var (
+	sink   *Sink
+	tp     *sdktrace.TracerProvider
+	mp     *metric.MeterProvider
+	lp     *sdklog.LoggerProvider
+	tracer trace.Tracer
+)
+
+// ---------------------------------------------------------------------------
+// TestMain
+// ---------------------------------------------------------------------------
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
-	if os.Getenv("E2E_SKIP_DOCKER") == "" {
-		startOtelFront()
-	}
-	waitReady(apiAddr+"/health", 20*time.Second)
+	// Start in-process sink (always).
+	var err error
+	sink, err = NewSink()
+	must("in-process sink", err)
+	defer sink.Stop()
 
-	// OTel resource
+	otlpTarget := sink.Addr() // exporters point here by default
+
+	// Optionally also start otel-front for human browsing.
+	if os.Getenv("E2E_OTEL_FRONT") != "" {
+		startOtelFront()
+		defer stopOtelFront()
+		// Fan-out not supported in standard OTel SDK; otel-front gets same data
+		// by pointing exporters there instead. Set target to otel-front.
+		otlpTarget = "localhost:4317"
+		waitHTTPReady("http://localhost:8000/health", 20*time.Second)
+		fmt.Fprintln(os.Stderr, "otel-front UI: http://localhost:8000")
+	}
+
 	res, _ := resource.New(ctx,
 		resource.WithAttributes(semconv.ServiceName("zia-log-e2e")),
 	)
 
-	// Trace exporter → otel-front gRPC
+	// Traces
 	traceExp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(otlpGRPCAddr),
+		otlptracegrpc.WithEndpoint(otlpTarget),
 		otlptracegrpc.WithInsecure(),
 	)
 	must("trace exporter", err)
@@ -97,52 +119,41 @@ func TestMain(m *testing.M) {
 	)
 	tracer = tp.Tracer("zia-e2e")
 
-	// Metric exporter → otel-front gRPC
+	// Metrics — 200ms flush so tests don't wait long.
 	metricExp, err := otlpmetricgrpc.New(ctx,
-		otlpmetricgrpc.WithEndpoint(otlpGRPCAddr),
+		otlpmetricgrpc.WithEndpoint(otlpTarget),
 		otlpmetricgrpc.WithInsecure(),
 	)
 	must("metric exporter", err)
-	mp := metric.NewMeterProvider(
+	mp = metric.NewMeterProvider(
 		metric.WithReader(metric.NewPeriodicReader(metricExp,
-			metric.WithInterval(500*time.Millisecond))), // fast flush for tests
+			metric.WithInterval(200*time.Millisecond))),
 		metric.WithResource(res),
 	)
 
-	// Log exporter → otel-front gRPC (OTLP Logs)
+	// Logs
 	logExp, err := otlploggrpc.New(ctx,
-		otlploggrpc.WithEndpoint(otlpGRPCAddr),
+		otlploggrpc.WithEndpoint(otlpTarget),
 		otlploggrpc.WithInsecure(),
 	)
 	must("log exporter", err)
-	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+	lp = sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewSimpleProcessor(logExp)),
 		sdklog.WithResource(res),
 	)
 
 	// Wire telemetry library
-	sink := ziolog.NewOTelSink(mp, "zia")
-	telemetry.SetGlobalMetricSink(sink)
-
-	// slog → OTel log bridge so our log lines also go to otel-front
-	otelBridge := &otelLogRecord{provider: lp}
-	sl := slog.New(slog.NewJSONHandler(os.Stderr, nil)) // stderr for local visibility
-	_ = sl
-	scope.UseLogger(ziolog.New(slog.New(otelBridge)))
+	telemetry.SetGlobalMetricSink(ziolog.NewOTelSink(mp, "zia"))
+	scope.UseLogger(ziolog.New(slog.New(&otelBridge{provider: lp})))
 
 	code := m.Run()
 
-	// Flush before exit
 	_ = tp.ForceFlush(ctx)
 	_ = mp.ForceFlush(ctx)
 	_ = lp.ForceFlush(ctx)
 	_ = tp.Shutdown(ctx)
 	_ = mp.Shutdown(ctx)
 	_ = lp.Shutdown(ctx)
-
-	if os.Getenv("E2E_SKIP_DOCKER") == "" {
-		stopOtelFront()
-	}
 
 	os.Exit(code)
 }
@@ -151,13 +162,14 @@ func TestMain(m *testing.M) {
 // Tests
 // ---------------------------------------------------------------------------
 
-// TestLogAndMetricReachOtelFront is the end-to-end proof:
-// one log.Metric(...).Info(...) call → metric visible in otel-front API.
-func TestLogAndMetricReachOtelFront(t *testing.T) {
+// TestWhenWeLogWeAlsoSendMetrics — one call emits both log + metric.
+// The in-process sink validates exact values and labels, no sleep needed.
+func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
+	sink.Reset()
+
 	ctx, span := tracer.Start(context.Background(), "quota.Reserve")
 	traceID := span.SpanContext().TraceID().String()
 
-	// Single call: log + metric + trace correlation
 	quotaLog.Context(ctx).
 		Metric(reserveOK.With(clusterLabel.Upsert("openai"))).
 		Info("reserve success", "user_id", "alice", "tokens", 1000)
@@ -166,84 +178,74 @@ func TestLogAndMetricReachOtelFront(t *testing.T) {
 		Metric(reserveErrors.With(clusterLabel.Upsert("anthropic"))).
 		Error("reserve failed", context.DeadlineExceeded, "user_id", "bob")
 
-	// End span explicitly then flush so otel-front receives it before we assert.
 	span.End()
 	_ = tp.ForceFlush(ctx)
+	_ = lp.ForceFlush(ctx) // flush log batch before asserting
 
-	// Give periodic reader time to flush metrics too.
-	time.Sleep(2 * time.Second)
-
-	assertMetricExists(t, "zia_quota_reserve_total")
-	assertMetricExists(t, "zia_quota_reserve_errors_total")
-	assertTraceExists(t, traceID)
-
-	t.Logf("trace_id=%s visible in otel-front at %s/traces", traceID, apiAddr)
-}
-
-// TestMetricFiresWhenLogSilenced — even with Error-only log level, metric fires.
-func TestMetricFiresWhenLogSilenced(t *testing.T) {
-	var silenced telemetry.Metric
-	telemetry.ToGlobalMetricSink(func(ms telemetry.MetricSink) {
-		silenced = ms.NewSum("zia_silenced_events_total", "Silenced info events")
-	})
-
-	sl := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	logger := ziolog.New(sl)
-	logger.SetLevel(telemetry.LevelError)
-
-	logger.Metric(silenced).Info("this log is dropped") // ← silent, metric still fires
-
-	time.Sleep(2 * time.Second)
-	assertMetricExists(t, "zia_silenced_events_total")
-}
-
-// ---------------------------------------------------------------------------
-// REST API assertions
-// ---------------------------------------------------------------------------
-
-func assertMetricExists(t *testing.T, name string) {
-	t.Helper()
-	url := fmt.Sprintf("%s/api/metrics/names", apiAddr)
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Names []string `json:"names"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("decode metric names: %v", err)
+	// Metrics — exact value + label, no sleep
+	val, ok := sink.WaitForCounter("zia_quota_reserve_total", "cluster", "openai", 1, 5*time.Second)
+	if !ok {
+		t.Errorf("zia_quota_reserve_total{cluster=openai}: want >= 1, got %d", val)
+	} else {
+		t.Logf("zia_quota_reserve_total{cluster=openai} = %d", val)
 	}
 
-	for _, n := range result.Names {
-		if n == name {
-			t.Logf("metric %q found in otel-front", name)
-			return
+	val, ok = sink.WaitForCounter("zia_quota_reserve_errors_total", "cluster", "anthropic", 1, 5*time.Second)
+	if !ok {
+		t.Errorf("zia_quota_reserve_errors_total{cluster=anthropic}: want >= 1, got %d", val)
+	} else {
+		t.Logf("zia_quota_reserve_errors_total{cluster=anthropic} = %d", val)
+	}
+
+	// Logs — body + trace ID correlation (trace_id stored as attribute by the bridge)
+	rec, ok := sink.WaitForLog("reserve success", 5*time.Second)
+	if !ok {
+		t.Error("log record 'reserve success' not received")
+	} else {
+		logTraceID := rec.Attrs["trace_id"] // bridge stores it as an attribute
+		t.Logf("log: body=%q trace_id=%s", rec.Body, logTraceID)
+		if logTraceID != traceID {
+			t.Errorf("log trace_id mismatch: want %s, got %s", traceID, logTraceID)
 		}
 	}
-	t.Errorf("metric %q not found in otel-front; got: %v", name, result.Names)
+
+	// Spans — by trace ID
+	sp, ok := sink.WaitForSpan(traceID, 5*time.Second)
+	if !ok {
+		t.Errorf("span with trace_id=%s not received", traceID)
+	} else {
+		t.Logf("span: name=%q trace_id=%s", sp.Name, sp.TraceID)
+	}
 }
 
-func assertTraceExists(t *testing.T, traceID string) {
-	t.Helper()
-	url := fmt.Sprintf("%s/api/traces/%s", apiAddr, traceID)
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
+// TestMetricFiresEvenWhenLogIsSilenced — the key guarantee.
+// Log is suppressed at Error level; metric still reaches the sink.
+func TestMetricFiresEvenWhenLogIsSilenced(t *testing.T) {
+	sink.Reset()
+
+	var silenced telemetry.Metric
+	telemetry.ToGlobalMetricSink(func(ms telemetry.MetricSink) {
+		silenced = ms.NewSum("zia_silenced_events_total", "Info events when log silenced")
+	})
+
+	logger := ziolog.New(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	logger.SetLevel(telemetry.LevelError) // Info silenced
+
+	logger.Metric(silenced).Info("this log will NOT appear in output")
+
+	val, ok := sink.WaitForCounter("zia_silenced_events_total", "", "", 1, 5*time.Second)
+	if !ok {
+		t.Errorf("metric fired despite log silence: want >= 1, got %d", val)
+	} else {
+		t.Logf("zia_silenced_events_total = %d (log was silent)", val)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		t.Logf("trace %s found in otel-front", traceID)
-		return
-	}
-	t.Errorf("trace %s not found, status=%d", traceID, resp.StatusCode)
 }
 
 // ---------------------------------------------------------------------------
-// Docker lifecycle
+// otel-front Docker lifecycle (only when E2E_OTEL_FRONT=1)
 // ---------------------------------------------------------------------------
+
+const containerName = "otel-front-e2e"
 
 func startOtelFront() {
 	_ = exec.Command("docker", "rm", "-f", containerName).Run()
@@ -266,7 +268,7 @@ func stopOtelFront() {
 	_ = exec.Command("docker", "rm", "-f", containerName).Run()
 }
 
-func waitReady(url string, timeout time.Duration) {
+func waitHTTPReady(url string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(url)
@@ -275,10 +277,6 @@ func waitReady(url string, timeout time.Duration) {
 			return
 		}
 		time.Sleep(300 * time.Millisecond)
-	}
-	// Also try raw TCP in case health endpoint is slow
-	if _, err := net.DialTimeout("tcp", otlpGRPCAddr, 2*time.Second); err == nil {
-		return
 	}
 	fmt.Fprintf(os.Stderr, "otel-front not ready at %s after %s\n", url, timeout)
 	os.Exit(1)
@@ -291,12 +289,15 @@ func must(label string, err error) {
 	}
 }
 
-// otelLogRecord bridges slog → OTel log SDK (so log lines reach otel-front).
-type otelLogRecord struct {
+// ---------------------------------------------------------------------------
+// slog → OTel log bridge
+// ---------------------------------------------------------------------------
+
+type otelBridge struct {
 	provider *sdklog.LoggerProvider
 }
 
-func (b *otelLogRecord) Handle(ctx context.Context, r slog.Record) error {
+func (b *otelBridge) Handle(ctx context.Context, r slog.Record) error {
 	logger := b.provider.Logger("zia-log")
 	var rec otellog.Record
 	rec.SetTimestamp(r.Time)
@@ -306,10 +307,17 @@ func (b *otelLogRecord) Handle(ctx context.Context, r slog.Record) error {
 		rec.AddAttributes(otellog.String(a.Key, fmt.Sprint(a.Value.Any())))
 		return true
 	})
+	// Propagate OTel trace context so the log record carries trace_id.
+	if sc := trace.SpanFromContext(ctx).SpanContext(); sc.IsValid() {
+		rec.AddAttributes(
+			otellog.String("trace_id", sc.TraceID().String()),
+			otellog.String("span_id", sc.SpanID().String()),
+		)
+	}
 	logger.Emit(ctx, rec)
 	return nil
 }
 
-func (b *otelLogRecord) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (b *otelLogRecord) WithAttrs(attrs []slog.Attr) slog.Handler    { return b }
-func (b *otelLogRecord) WithGroup(name string) slog.Handler           { return b }
+func (b *otelBridge) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (b *otelBridge) WithAttrs(_ []slog.Attr) slog.Handler          { return b }
+func (b *otelBridge) WithGroup(_ string) slog.Handler                { return b }
