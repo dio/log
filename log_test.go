@@ -20,7 +20,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Package-level metric declarations — mirrors what quotasvc/metrics.go would do.
+// Package-level metric declarations, mirroring what quotasvc/metrics.go would do.
 // Libraries call ToGlobalMetricSink; the app wires the sink once in main/TestMain.
 // ---------------------------------------------------------------------------
 
@@ -43,7 +43,7 @@ func init() {
 var log = scope.Register("quotasvc", "Quota service operations")
 
 // ---------------------------------------------------------------------------
-// OTel SDK setup — real pipeline, in-memory reader for assertions.
+// OTel SDK setup: real pipeline, in-memory reader for assertions.
 // ---------------------------------------------------------------------------
 
 var (
@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 }
 
 // ---------------------------------------------------------------------------
-// TestWhenWeLogWeAlsoSendMetrics — the core aim.
+// TestWhenWeLogWeAlsoSendMetrics: the core aim.
 //
 // ONE call: log.Metric(...).Info(...)
 //   → slog line out to stderr
@@ -98,7 +98,7 @@ func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestMetricFiresEvenWhenLogIsSilenced — metrics are unconditional.
+// TestMetricFiresEvenWhenLogIsSilenced: metrics are unconditional.
 //
 // Set level to Error. Info log is dropped. Metric still records.
 // This is the killer guarantee: tune log verbosity without losing alerting signal.
@@ -121,7 +121,7 @@ func TestMetricFiresEvenWhenLogIsSilenced(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestTraceIDAppearsInLog — OTel trace correlation.
+// TestTraceIDAppearsInLog: OTel trace correlation.
 //
 // When a span is active in context, trace_id and span_id are injected into
 // every log line automatically. No manual extraction needed.
@@ -154,7 +154,7 @@ func TestTraceIDAppearsInLog(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestContextLabelsCarryToMetrics — context KVPs flow into both log + metric.
+// TestContextLabelsCarryToMetrics: context KVPs flow into both log + metric.
 // ---------------------------------------------------------------------------
 
 func TestContextLabelsCarryToMetrics(t *testing.T) {

@@ -60,10 +60,10 @@ import (
 const (
 	LevelDebug     = slog.Level(-4) // DEBUG
 	LevelInfo      = slog.Level(0)  // INFO
-	LevelNotice    = slog.Level(2)  // NOTICE    — normal but significant events
-	LevelWarning   = slog.Level(4)  // WARNING   — might cause problems
-	LevelError     = slog.Level(8)  // ERROR     — likely to cause problems
-	LevelEmergency = slog.Level(12) // EMERGENCY — system is unusable
+	LevelNotice    = slog.Level(2)  // NOTICE    (normal but significant events)
+	LevelWarning   = slog.Level(4)  // WARNING   (might cause problems)
+	LevelError     = slog.Level(8)  // ERROR     (likely to cause problems)
+	LevelEmergency = slog.Level(12) // EMERGENCY (system is unusable)
 )
 
 // NewHandler returns a slog.Handler that writes GCP Cloud Logging compatible

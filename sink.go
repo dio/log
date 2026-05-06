@@ -8,7 +8,7 @@ import (
 )
 
 // NewMemSink returns a MetricSink that stores observations in memory.
-// Useful for development and tests — dump with sink.Snapshot().
+// Useful for development and tests; dump with sink.Snapshot().
 func NewMemSink() *MemSink {
 	return &MemSink{metrics: map[string]*memMetric{}}
 }

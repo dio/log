@@ -1,6 +1,6 @@
 // Command server demonstrates github.com/dio/log in a minimal HTTP server.
 //
-// Every request handler calls log.Metric(...).Info/Error — one call that emits
+// Every request handler calls log.Metric(...).Info/Error, one call that emits
 // both a structured log line and an OTel counter. When an OTel span is active,
 // trace_id and span_id are automatically injected into the log line.
 //
@@ -72,7 +72,7 @@ var tracer trace.Tracer
 // ---------------------------------------------------------------------------
 
 func handleHello(w http.ResponseWriter, r *http.Request) {
-	// Start a span — trace_id and span_id are injected into the log line below.
+	// Start a span; trace_id and span_id are injected into the log line below.
 	ctx, span := tracer.Start(r.Context(), "handleHello")
 	defer span.End()
 
@@ -123,7 +123,7 @@ func main() {
 	// OTel traces: stdout exporter so trace_id/span_id are visible in log output.
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
-		// No exporter configured — spans stay local. In production, add an
+		// No exporter configured, spans stay local. In production, add an
 		// OTLP exporter here and they appear in Cloud Trace / Jaeger / Tempo.
 	)
 	defer tp.Shutdown(ctx)

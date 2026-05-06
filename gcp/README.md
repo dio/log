@@ -87,7 +87,7 @@ an active OTel span is present in the context. No extra code needed in handlers.
 ```
 
 Cloud Logging promotes `severity` and `message` as first-class fields. The trace
-field links the entry to the Cloud Trace span — clicking the trace icon in Logs
+field links the entry to the Cloud Trace span. Clicking the trace icon in Logs
 Explorer opens Cloud Trace at the exact span.
 
 ---

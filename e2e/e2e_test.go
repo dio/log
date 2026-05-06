@@ -2,7 +2,7 @@
 
 // Package e2e tests github.com/dio/log against a real OTLP sink.
 //
-// By default, an in-process OTLP gRPC sink is used — no Docker required,
+// By default, an in-process OTLP gRPC sink is used, no Docker required,
 // precise assertions (value, label, trace ID), no sleep.
 //
 // For human verification, set E2E_OTEL_FRONT=1 to additionally start otel-front
@@ -119,7 +119,7 @@ func TestMain(m *testing.M) {
 	)
 	tracer = tp.Tracer("zia-e2e")
 
-	// Metrics — 200ms flush so tests don't wait long.
+	// Metrics: 200ms flush so tests don't wait long.
 	metricExp, err := otlpmetricgrpc.New(ctx,
 		otlpmetricgrpc.WithEndpoint(otlpTarget),
 		otlpmetricgrpc.WithInsecure(),
@@ -162,7 +162,7 @@ func TestMain(m *testing.M) {
 // Tests
 // ---------------------------------------------------------------------------
 
-// TestWhenWeLogWeAlsoSendMetrics — one call emits both log + metric.
+// TestWhenWeLogWeAlsoSendMetrics: one call emits both log + metric.
 // The in-process sink validates exact values and labels, no sleep needed.
 func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 	sink.Reset()
@@ -182,7 +182,7 @@ func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 	_ = tp.ForceFlush(ctx)
 	_ = lp.ForceFlush(ctx) // flush log batch before asserting
 
-	// Metrics — exact value + label, no sleep
+	// Metrics: exact value + label, no sleep
 	val, ok := sink.WaitForCounter("zia_quota_reserve_total", "cluster", "openai", 1, 5*time.Second)
 	if !ok {
 		t.Errorf("zia_quota_reserve_total{cluster=openai}: want >= 1, got %d", val)
@@ -197,7 +197,7 @@ func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 		t.Logf("zia_quota_reserve_errors_total{cluster=anthropic} = %d", val)
 	}
 
-	// Logs — body + trace ID correlation (trace_id stored as attribute by the bridge)
+	// Logs: body + trace ID correlation (trace_id stored as attribute by the bridge)
 	rec, ok := sink.WaitForLog("reserve success", 5*time.Second)
 	if !ok {
 		t.Error("log record 'reserve success' not received")
@@ -209,7 +209,7 @@ func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 		}
 	}
 
-	// Spans — by trace ID
+	// Spans: by trace ID
 	sp, ok := sink.WaitForSpan(traceID, 5*time.Second)
 	if !ok {
 		t.Errorf("span with trace_id=%s not received", traceID)
@@ -218,7 +218,7 @@ func TestWhenWeLogWeAlsoSendMetrics(t *testing.T) {
 	}
 }
 
-// TestMetricFiresEvenWhenLogIsSilenced — the key guarantee.
+// TestMetricFiresEvenWhenLogIsSilenced: the key guarantee.
 // Log is suppressed at Error level; metric still reaches the sink.
 func TestMetricFiresEvenWhenLogIsSilenced(t *testing.T) {
 	sink.Reset()

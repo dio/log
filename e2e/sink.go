@@ -17,10 +17,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Sink — in-process OTLP gRPC receiver for test assertions.
+// Sink is an in-process OTLP gRPC receiver for test assertions.
 //
 // Starts on a random port. Point your OTel exporters at Sink.Addr().
-// Use WaitFor* helpers instead of time.Sleep — they poll at 100ms intervals.
+// Use WaitFor* helpers instead of time.Sleep; they poll at 100ms intervals.
 // ---------------------------------------------------------------------------
 
 // SpanRecord is a simplified view of a received span.
@@ -87,7 +87,7 @@ func (s *Sink) Reset() {
 }
 
 // ---------------------------------------------------------------------------
-// WaitFor* helpers — poll until predicate matches or timeout expires.
+// WaitFor* helpers poll until predicate matches or timeout expires.
 // ---------------------------------------------------------------------------
 
 // WaitForCounter waits until the named counter (with optional label match) has
@@ -154,7 +154,7 @@ func (s *Sink) sumCounter(name, labelKey, labelVal string) int64 {
 }
 
 // ---------------------------------------------------------------------------
-// gRPC service implementations — one wrapper per service to satisfy interface.
+// gRPC service implementations, one wrapper per service to satisfy interface.
 // ---------------------------------------------------------------------------
 
 type traceServiceImpl struct {
