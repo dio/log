@@ -30,7 +30,7 @@ func TestNewHandler_fieldRemapping(t *testing.T) {
 		t.Error("msg key must not be present")
 	}
 
-	// "level" → "severity" with GCP value
+	// "level" → "severity"
 	if entry["severity"] != "INFO" {
 		t.Errorf("severity: got %v", entry["severity"])
 	}
@@ -49,15 +49,21 @@ func TestNewHandler_severityMapping(t *testing.T) {
 		level    slog.Level
 		expected string
 	}{
-		{slog.LevelDebug, "DEBUG"},
-		{slog.LevelInfo, "INFO"},
-		{slog.LevelWarn, "WARNING"}, // GCP uses WARNING not WARN
+		{gcp.LevelDebug, "DEBUG"},
+		{gcp.LevelInfo, "INFO"},
+		{gcp.LevelNotice, "NOTICE"},
+		{gcp.LevelWarning, "WARNING"},
+		{gcp.LevelError, "ERROR"},
+		{gcp.LevelEmergency, "EMERGENCY"},
+		// slog compat: LevelWarn (4) == LevelWarning
+		{slog.LevelWarn, "WARNING"},
+		// slog compat: LevelError (8) == LevelError
 		{slog.LevelError, "ERROR"},
 	}
 
 	for _, tc := range cases {
 		var buf bytes.Buffer
-		h := gcp.NewHandler(&buf, "proj", &slog.HandlerOptions{Level: slog.LevelDebug})
+		h := gcp.NewHandler(&buf, "proj", &slog.HandlerOptions{Level: gcp.LevelDebug})
 		slog.New(h).Log(nil, tc.level, "test")
 
 		var entry map[string]any
@@ -115,11 +121,9 @@ func TestReplaceAttr_chainsWithExisting(t *testing.T) {
 	var entry map[string]any
 	_ = json.Unmarshal(buf.Bytes(), &entry)
 
-	// GCP remapping applied.
 	if entry["severity"] != "INFO" {
 		t.Errorf("severity: got %v", entry["severity"])
 	}
-	// Custom ReplaceAttr also applied.
 	if entry["password"] != "[redacted]" {
 		t.Errorf("password: got %v, want [redacted]", entry["password"])
 	}
@@ -136,5 +140,34 @@ func TestNewHandler_jsonOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, `"message":"high latency"`) {
 		t.Errorf("missing message: %s", out)
+	}
+}
+
+func TestLevelNotice(t *testing.T) {
+	var buf bytes.Buffer
+	h := gcp.NewHandler(&buf, "proj", &slog.HandlerOptions{Level: gcp.LevelDebug})
+	slog.New(h).Log(nil, gcp.LevelNotice, "quota threshold reached", "used", 80)
+
+	var entry map[string]any
+	_ = json.Unmarshal(buf.Bytes(), &entry)
+
+	if entry["severity"] != "NOTICE" {
+		t.Errorf("severity: got %v, want NOTICE", entry["severity"])
+	}
+	if entry["message"] != "quota threshold reached" {
+		t.Errorf("message: got %v", entry["message"])
+	}
+}
+
+func TestLevelEmergency(t *testing.T) {
+	var buf bytes.Buffer
+	h := gcp.NewHandler(&buf, "proj", &slog.HandlerOptions{Level: gcp.LevelDebug})
+	slog.New(h).Log(nil, gcp.LevelEmergency, "data loss detected")
+
+	var entry map[string]any
+	_ = json.Unmarshal(buf.Bytes(), &entry)
+
+	if entry["severity"] != "EMERGENCY" {
+		t.Errorf("severity: got %v, want EMERGENCY", entry["severity"])
 	}
 }

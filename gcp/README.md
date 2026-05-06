@@ -124,12 +124,26 @@ slog.New(slog.NewJSONHandler(os.Stderr, opts))
 
 ## Severity mapping
 
-| `slog.Level` | Cloud Logging severity |
-|---|---|
-| `LevelDebug` | `DEBUG` |
-| `LevelInfo` | `INFO` |
-| `LevelWarn` | `WARNING` |
-| `LevelError` | `ERROR` |
+Cloud Logging defines more severity levels than slog's four. This package exposes
+them as `slog.Level` constants that fit into slog's numeric space:
+
+| Constant | Value | Cloud Logging severity | When to use |
+|---|---|---|---|
+| `gcp.LevelDebug` | -4 | `DEBUG` | Detailed diagnostic info |
+| `gcp.LevelInfo` | 0 | `INFO` | Normal operation |
+| `gcp.LevelNotice` | 2 | `NOTICE` | Normal but significant events |
+| `gcp.LevelWarning` | 4 | `WARNING` | Might cause problems |
+| `gcp.LevelError` | 8 | `ERROR` | Likely to cause problems |
+| `gcp.LevelEmergency` | 12 | `EMERGENCY` | System is unusable |
+
+`gcp.LevelWarning` and `gcp.LevelNotice` sit between slog's `LevelInfo` (0) and
+`LevelWarn` (4), so the standard slog `LevelWarn` also maps to `WARNING`. Use the
+`gcp.Level*` constants when you need `NOTICE` or `EMERGENCY`:
+
+```go
+logger.Log(ctx, gcp.LevelNotice, "quota threshold reached", "used_pct", 80)
+logger.Log(ctx, gcp.LevelEmergency, "data loss detected", "table", "users")
+```
 
 ---
 
