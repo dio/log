@@ -124,7 +124,7 @@ arrive at a collector. Two options:
 
 **Real collector (otel-front, Jaeger, etc.)** — requires Docker, has startup latency,
 and the REST API only exposes coarse queries (does metric name exist? does trace ID
-200?). No way to assert `zia_quota_reserve_total{cluster="openai"} == 1` without
+200?). No way to assert `myservice_reserve_total{cluster="openai"} == 1` without
 parsing the Prometheus text format.
 
 **In-process OTLP gRPC sink** — starts on a random port in `TestMain`, receives the
