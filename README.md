@@ -55,15 +55,15 @@ go get github.com/dio/log
 import (
     "log/slog"
 
-    ziolog "github.com/dio/log"
+    log "github.com/dio/log"
     "github.com/tetratelabs/telemetry"
     "github.com/tetratelabs/telemetry/scope"
 )
 
 // meterProvider is your existing OTel MeterProvider (Prometheus, OTLP, etc.)
-sink := ziolog.NewOTelSink(meterProvider, "myapp")
+sink := NewOTelSink(meterProvider, "myapp")
 telemetry.SetGlobalMetricSink(sink)
-scope.UseLogger(ziolog.New(slog.Default()))
+scope.UseLogger(New(slog.Default()))
 ```
 
 ### 2. Declare metrics in library code
@@ -140,7 +140,7 @@ go test -race ./...
 Uses `MemSink` — no external deps, instant:
 
 ```go
-sink := ziolog.NewMemSink()
+sink := NewMemSink()
 telemetry.SetGlobalMetricSink(sink)
 // ...
 assert.Equal(t, float64(1), sink.Snapshot()["app_requests_total"])

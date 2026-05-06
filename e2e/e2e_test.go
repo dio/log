@@ -42,7 +42,7 @@ import (
 	"github.com/tetratelabs/telemetry"
 	"github.com/tetratelabs/telemetry/scope"
 
-	ziolog "github.com/dio/log"
+	log "github.com/dio/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -143,8 +143,8 @@ func TestMain(m *testing.M) {
 	)
 
 	// Wire telemetry library
-	telemetry.SetGlobalMetricSink(ziolog.NewOTelSink(mp, "zia"))
-	scope.UseLogger(ziolog.New(slog.New(&otelBridge{provider: lp})))
+	telemetry.SetGlobalMetricSink(log.NewOTelSink(mp, "zia"))
+	scope.UseLogger(log.New(slog.New(&otelBridge{provider: lp})))
 
 	code := m.Run()
 
@@ -228,7 +228,7 @@ func TestMetricFiresEvenWhenLogIsSilenced(t *testing.T) {
 		silenced = ms.NewSum("zia_silenced_events_total", "Info events when log silenced")
 	})
 
-	logger := ziolog.New(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	logger := log.New(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	logger.SetLevel(telemetry.LevelError) // Info silenced
 
 	logger.Metric(silenced).Info("this log will NOT appear in output")

@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	ziolog "github.com/dio/log"
+	log "github.com/dio/log"
 	"github.com/tetratelabs/telemetry"
 	"github.com/tetratelabs/telemetry/scope"
 
@@ -59,14 +59,14 @@ func init() {
 	})
 }
 
-var log = scope.Register("server", "HTTP server")
+var logger = scope.Register("server", "HTTP server")
 
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 func handleHello(w http.ResponseWriter, r *http.Request) {
-	log.Context(r.Context()).
+	logger.Context(r.Context()).
 		Metric(requests.With(routeLabel.Upsert(r.URL.Path))).
 		Info("request handled", "method", r.Method, "path", r.URL.Path)
 
@@ -76,7 +76,7 @@ func handleHello(w http.ResponseWriter, r *http.Request) {
 func handleFail(w http.ResponseWriter, r *http.Request) {
 	err := errors.New("something went wrong")
 
-	log.Context(r.Context()).
+	logger.Context(r.Context()).
 		Metric(errors_.With(routeLabel.Upsert(r.URL.Path))).
 		Error("request failed", err, "method", r.Method, "path", r.URL.Path)
 
@@ -104,8 +104,8 @@ func main() {
 	defer mp.Shutdown(ctx)
 
 	// Wire telemetry library.
-	telemetry.SetGlobalMetricSink(ziolog.NewOTelSink(mp, "example"))
-	scope.UseLogger(ziolog.New(sl))
+	telemetry.SetGlobalMetricSink(log.NewOTelSink(mp, "example"))
+	scope.UseLogger(log.New(sl))
 
 	// App server.
 	mux := http.NewServeMux()
