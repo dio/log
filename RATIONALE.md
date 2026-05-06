@@ -8,7 +8,7 @@ Why this library exists and the specific decisions it makes.
 
 A single log line that says `"request failed"` is rarely actionable on its own.
 One error in isolation could be a transient blip. What's actually actionable is
-when the **frequency** of that message changes — ten errors per second after days
+when the **frequency** of that message changes. Ten errors per second after days
 of zero is your alert condition.
 
 This means most Info and Error log lines in a service should have a paired metric.
@@ -35,8 +35,8 @@ This breaks in two ways:
 you add the log and forget the metric. The alert never fires. You only find out during
 an incident.
 
-**2. Silencing logs silences metrics.** When you tune log verbosity in production —
-setting level to Warn or Error to cut noise — the Info log disappears. If the metric
+**2. Silencing logs silences metrics.** When you tune log verbosity in production,
+setting level to Warn or Error to cut noise, the Info log disappears. If the metric
 was only emitted from the same `if level >= Info` branch, the metric disappears too.
 Your dashboard goes dark exactly when you most want signal.
 
@@ -62,7 +62,7 @@ func (l *slogLogger) Info(msg string, kvs ...any) {
 This is not an accident. It is the single most important invariant in the library.
 Changing this ordering would silently break every alert that relies on it.
 
-The `LevelNone` carve-out is for the `scope` package's default level — when a scope
+The `LevelNone` carve-out is for the `scope` package's default level. When a scope
 has not been explicitly configured, `LevelNone` means "inherit the underlying logger's
 level" rather than "silence everything."
 
@@ -74,7 +74,7 @@ level" rather than "silence everything."
 filtering, and a pluggable `Handler` interface. It is the right default for new Go
 services that don't want to pull in zap or zerolog.
 
-The `tetratelabs/telemetry` library is backend-agnostic — it defines a `Logger`
+The `tetratelabs/telemetry` library is backend-agnostic. It defines a `Logger`
 interface and a `function` package with a concrete adapter. We implement that
 interface directly over slog to keep the dep graph flat: one import for the
 telemetry abstraction, stdlib for the logging backend.
@@ -86,11 +86,11 @@ telemetry abstraction, stdlib for the logging backend.
 The `OTelSink` backed by an OTel `MeterProvider` means:
 
 - The same metric flows to Prometheus (via the Prometheus exporter) **and** to an
-  OTLP collector (Grafana, Jaeger, Honeycomb, etc.) simultaneously — just by
-  configuring multiple readers on the provider.
+  OTLP collector (Grafana, Jaeger, Honeycomb, etc.) simultaneously. Just configure
+  multiple readers on the provider.
 - Metrics carry the same resource attributes (`service.name`, `service.version`,
   host info) as traces, so correlation in a backend like Grafana is automatic.
-- No custom Prometheus registry, no manual `prometheus.MustRegister` — the OTel SDK
+- No custom Prometheus registry, no manual `prometheus.MustRegister`. The OTel SDK
   handles registration, cardinality limits, and exemplars.
 
 For tests, `MemSink` skips all of that and stores values in a plain `map[string]float64`.
@@ -111,8 +111,8 @@ This links the log to its span without requiring a log aggregation pipeline to d
 the join. Loki, Datadog, and Cloud Logging all support `trace_id` as a correlation
 field natively. The join is free.
 
-The alternative — manually extracting `span.SpanContext().TraceID().String()` and
-passing it as a key-value pair in every log call — is exactly the kind of boilerplate
+The alternative is to manually extract `span.SpanContext().TraceID().String()` and
+pass it as a key-value pair in every log call. This is exactly the kind of boilerplate
 that gets forgotten under pressure.
 
 ---
@@ -120,20 +120,20 @@ that gets forgotten under pressure.
 ## Why the e2e uses an in-process sink instead of a real collector
 
 The e2e test needs to assert that specific metric values, log bodies, and span names
-arrive at a collector. Two options:
+arrive at a collector. Two options exist:
 
-**Real collector (otel-front, Jaeger, etc.)** — requires Docker, has startup latency,
+**Real collector (otel-front, Jaeger, etc.):** Requires Docker, has startup latency,
 and the REST API only exposes coarse queries (does metric name exist? does trace ID
 return 200?). No way to assert `app_requests_total{route="/api/v1/users"} == 1`
 without parsing the Prometheus text format.
 
-**In-process OTLP gRPC sink** — starts on a random port in `TestMain`, receives the
+**In-process OTLP gRPC sink:** Starts on a random port in `TestMain`, receives the
 same proto messages a real collector would, stores them in memory, exposes `WaitFor*`
 helpers that poll at 100ms. The whole suite runs in under one second. No Docker. No
 flakiness from container startup timing. Exact assertions on values, labels, and
 attributes.
 
 The in-process sink is the right default for CI. The real collector is the right tool
-for *human* verification — seeing the correlated trace/log/metric in a UI. Both are
+for *human* verification. See the correlated trace/log/metric in a UI. Both are
 supported: `go test -tags e2e` for CI, `E2E_OTEL_FRONT=1 go test -tags e2e` for
 visual inspection.

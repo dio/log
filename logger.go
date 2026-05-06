@@ -1,7 +1,7 @@
 // Package log provides a slog-backed implementation of tetratelabs/telemetry.Logger
 // optimized for OpenTelemetry: metrics flow through an OTel MeterProvider, and
 // every log line automatically carries the OTel trace_id and span_id from context
-// when a span is active — making logs and traces trivially correlatable.
+// when a span is active, making logs and traces trivially correlatable.
 //
 // # Quick start
 //
@@ -49,7 +49,7 @@ func (l *slogLogger) Debug(msg string, kvs ...any) {
 
 func (l *slogLogger) Info(msg string, kvs ...any) {
 	if l.metric != nil {
-		l.metric.RecordContext(l.ctx, 1) // fires before level check — unconditional
+		l.metric.RecordContext(l.ctx, 1) // fires before level check, unconditional
 	}
 	if l.level != telemetry.LevelNone && l.level < telemetry.LevelInfo {
 		return

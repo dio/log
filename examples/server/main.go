@@ -104,7 +104,9 @@ func main() {
 	defer mp.Shutdown(ctx)
 
 	// Wire telemetry library.
-	telemetry.SetGlobalMetricSink(log.NewOTelSink(mp, "example"))
+	sink := log.NewOTelSink(mp, "example")
+	defer sink.Shutdown(ctx)
+	telemetry.SetGlobalMetricSink(sink)
 	scope.UseLogger(log.New(sl))
 
 	// App server.

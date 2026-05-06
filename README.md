@@ -16,7 +16,7 @@ In high-traffic services you suppress Info logs to cut noise and cost. The stand
 pattern breaks when you do that:
 
 ```go
-// Traditional — two separate calls
+// Traditional: two separate calls
 log.Info("request handled", "route", route)   // silenced at Error level → gone
 requestCounter.Add(ctx, 1)                     // easy to forget
 
@@ -28,14 +28,14 @@ log.Info("request handled", "route", route)   // ← silenced
 This library fixes it by making log and metric inseparable:
 
 ```go
-// One call — log + metric always together
+// One call: log + metric always together
 logger.Metric(requests).Info("request handled", "route", route)
 // level=Error: log silent, metric still fires
 // level=Debug: both log and metric fire
 ```
 
-The metric fires because `RecordContext` is called **before** the level check. See
-[RATIONALE.md](RATIONALE.md) for the full reasoning.
+The metric fires because `RecordContext` is called **before** the level check. For the full
+reasoning, see [RATIONALE.md](RATIONALE.md).
 
 ---
 
@@ -68,7 +68,7 @@ scope.UseLogger(log.New(slog.Default()))
 
 ### 2. Declare metrics in library code
 
-No implementation dependency — library code only imports the telemetry interface:
+No implementation dependency. Library code only imports the telemetry interface:
 
 ```go
 var (
@@ -110,7 +110,7 @@ log.Context(ctx).
 ### OTel trace correlation
 
 When a context with an active OTel span is attached via `.Context(ctx)`, `trace_id`
-and `span_id` are automatically injected into every log line — no manual extraction:
+and `span_id` are automatically injected into every log line without manual extraction:
 
 ```
 level=INFO msg="request handled" scope=server trace_id=c02b2a3a... span_id=d1449529... route=/api/v1/users
@@ -124,8 +124,8 @@ The same `trace_id` appears in the OTel trace, making cross-signal correlation t
 
 | Sink | When to use |
 |------|-------------|
-| `log.NewOTelSink(mp, name)` | Production — backed by OTel `MeterProvider`, exports to Prometheus or OTLP |
-| `log.NewMemSink()` | Tests — in-memory, inspect values with `sink.Snapshot()` |
+| `log.NewOTelSink(mp, name)` | Production: backed by OTel `MeterProvider`, exports to Prometheus or OTLP |
+| `log.NewMemSink()` | Tests: in-memory, inspect values with `sink.Snapshot()` |
 
 ---
 
@@ -137,7 +137,7 @@ The same `trace_id` appears in the OTel trace, making cross-signal correlation t
 go test -race ./...
 ```
 
-Uses `MemSink` — no external deps, instant:
+Uses `MemSink` without external deps, runs instantly:
 
 ```go
 sink := log.NewMemSink()
@@ -148,7 +148,7 @@ assert.Equal(t, float64(1), sink.Snapshot()["app_requests_total"])
 
 ### E2e tests
 
-Uses an in-process OTLP gRPC sink — no Docker, no sleep, precise assertions on
+Uses an in-process OTLP gRPC sink: no Docker, no sleep, precise assertions on
 exact values and labels:
 
 ```bash
@@ -176,21 +176,21 @@ For visual browsing of the full telemetry picture, run with
 [otel-front](https://github.com/mesaglio/otel-front):
 
 ```bash
-# Terminal 1 — start otel-front
+# Terminal 1: start otel-front
 docker run --rm -p 8000:8000 -p 4317:4317 -p 4318:4318 \
     ghcr.io/mesaglio/otel-front:latest
 
-# Terminal 2 — run e2e routing to otel-front
+# Terminal 2: run e2e routing to otel-front
 cd e2e && E2E_OTEL_FRONT=1 go test -v -tags e2e -timeout 90s ./...
 
 # Open http://localhost:8000
 ```
 
 You will see the same `trace_id` linking the log record, the metric data point,
-and the span — the three signals correlated in one view.
+and the span. The three signals are correlated in one view.
 
 ---
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

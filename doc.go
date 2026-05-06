@@ -10,7 +10,7 @@
 //	logger.SetLevel(telemetry.LevelError) // Info logs suppressed
 //	logger.Metric(myMetric).Info("reserve success") // log silent, metric still increments
 //
-// This decouples operational verbosity from alerting signal — the right tradeoff for
+// This decouples operational verbosity from alerting signal, the right tradeoff for
 // high-traffic services.
 //
 // # Quick start
@@ -40,8 +40,8 @@
 //
 // # Sinks
 //
-// [NewOTelSink] — production sink backed by a real OTel [go.opentelemetry.io/otel/sdk/metric.MeterProvider].
-// Metrics flow through the same Prometheus or OTLP pipeline as the rest of the service.
+// [NewOTelSink]: production sink backed by a real OTel [go.opentelemetry.io/otel/sdk/metric.MeterProvider].
+// Call [OTelSink.Shutdown] on exit to flush pending metrics.
 //
-// [NewMemSink] — in-memory sink for unit tests. Inspect recorded values with [MemSink.Snapshot].
+// [NewMemSink]: in-memory sink for unit tests. Inspect recorded values with [MemSink.Snapshot].
 package log

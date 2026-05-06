@@ -12,15 +12,24 @@ import (
 )
 
 // NewOTelSink returns a telemetry.MetricSink backed by an OTel MeterProvider.
-// Pass the same MeterProvider you use for Prometheus export — metrics created
+// Pass the same MeterProvider you use for Prometheus export; metrics created
 // here flow through the same pipeline.
+//
+// Call [OTelSink.Shutdown] on service exit to flush pending metrics.
 func NewOTelSink(mp *metric.MeterProvider, name string) *OTelSink {
-	return &OTelSink{meter: mp.Meter(name)}
+	return &OTelSink{meter: mp.Meter(name), mp: mp}
 }
 
 // OTelSink implements telemetry.MetricSink via the OTel metrics SDK.
 type OTelSink struct {
 	meter otelmetric.Meter
+	mp    *metric.MeterProvider
+}
+
+// Shutdown flushes and shuts down the underlying MeterProvider.
+// Call this on service exit, typically via defer or a run.Group actor.
+func (s *OTelSink) Shutdown(ctx context.Context) error {
+	return s.mp.Shutdown(ctx)
 }
 
 func (s *OTelSink) NewSum(name, desc string, opts ...telemetry.MetricOption) telemetry.Metric {
