@@ -55,15 +55,15 @@ go get github.com/dio/log
 import (
     "log/slog"
 
-    log "github.com/dio/log"
+    "github.com/dio/log"
     "github.com/tetratelabs/telemetry"
     "github.com/tetratelabs/telemetry/scope"
 )
 
 // meterProvider is your existing OTel MeterProvider (Prometheus, OTLP, etc.)
-sink := NewOTelSink(meterProvider, "myapp")
+sink := log.NewOTelSink(meterProvider, "myapp")
 telemetry.SetGlobalMetricSink(sink)
-scope.UseLogger(New(slog.Default()))
+scope.UseLogger(log.New(slog.Default()))
 ```
 
 ### 2. Declare metrics in library code
@@ -124,8 +124,8 @@ The same `trace_id` appears in the OTel trace, making cross-signal correlation t
 
 | Sink | When to use |
 |------|-------------|
-| `NewOTelSink(mp, name)` | Production — backed by OTel `MeterProvider`, exports to Prometheus or OTLP |
-| `NewMemSink()` | Tests — in-memory, inspect values with `sink.Snapshot()` |
+| `log.NewOTelSink(mp, name)` | Production — backed by OTel `MeterProvider`, exports to Prometheus or OTLP |
+| `log.NewMemSink()` | Tests — in-memory, inspect values with `sink.Snapshot()` |
 
 ---
 
@@ -140,7 +140,7 @@ go test -race ./...
 Uses `MemSink` — no external deps, instant:
 
 ```go
-sink := NewMemSink()
+sink := log.NewMemSink()
 telemetry.SetGlobalMetricSink(sink)
 // ...
 assert.Equal(t, float64(1), sink.Snapshot()["app_requests_total"])
