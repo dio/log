@@ -19,6 +19,7 @@ package log
 import (
 	"context"
 	"log/slog"
+	"slices"
 
 	"go.opentelemetry.io/otel/trace"
 
@@ -111,14 +112,11 @@ func (l *slogLogger) args(kvs []any) []any {
 	if len(l.kvs) == 0 {
 		return kvs
 	}
-	merged := make([]any, 0, len(l.kvs)+len(kvs))
-	merged = append(merged, l.kvs...)
-	merged = append(merged, kvs...)
-	return merged
+	return slices.Concat(l.kvs, kvs)
 }
 
 func (l *slogLogger) clone() *slogLogger {
 	c := *l
-	c.kvs = append([]any(nil), l.kvs...)
+	c.kvs = slices.Clone(l.kvs)
 	return &c
 }

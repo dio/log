@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -55,10 +56,6 @@ func (w *testingWriter) Write(b []byte) (int, error) {
 		return len(b), nil
 	}
 	// tb.Log adds a newline; strip the trailing one slog already appended.
-	s := string(b)
-	if len(s) > 0 && s[len(s)-1] == '\n' {
-		s = s[:len(s)-1]
-	}
-	w.tb.Log(s)
+	w.tb.Log(strings.TrimRight(string(b), "\n"))
 	return len(b), nil
 }

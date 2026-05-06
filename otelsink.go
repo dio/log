@@ -2,7 +2,7 @@ package log
 
 import (
 	"context"
-	"sync"
+	"slices"
 
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -38,7 +38,7 @@ func (s *OTelSink) NewSum(name, desc string, opts ...telemetry.MetricOption) tel
 		otelmetric.WithDescription(desc),
 		otelmetric.WithUnit(string(o.Unit)),
 	)
-	return &otelCounter{c: c, labels: o.Labels}
+	return &otelCounter{base: otelBase{with: toAttrs(o.Labels)}, c: c}
 }
 
 func (s *OTelSink) NewGauge(name, desc string, opts ...telemetry.MetricOption) telemetry.Metric {
@@ -47,7 +47,7 @@ func (s *OTelSink) NewGauge(name, desc string, opts ...telemetry.MetricOption) t
 		otelmetric.WithDescription(desc),
 		otelmetric.WithUnit(string(o.Unit)),
 	)
-	return &otelGauge{g: g, labels: o.Labels}
+	return &otelGauge{base: otelBase{with: toAttrs(o.Labels)}, g: g}
 }
 
 func (s *OTelSink) NewDistribution(name, desc string, bounds []float64, opts ...telemetry.MetricOption) telemetry.Metric {
@@ -57,7 +57,7 @@ func (s *OTelSink) NewDistribution(name, desc string, bounds []float64, opts ...
 		otelmetric.WithUnit(string(o.Unit)),
 		otelmetric.WithExplicitBucketBoundaries(bounds...),
 	)
-	return &otelHistogram{h: h, labels: o.Labels}
+	return &otelHistogram{base: otelBase{with: toAttrs(o.Labels)}, h: h}
 }
 
 func (s *OTelSink) NewLabel(name string) telemetry.Label {
@@ -65,7 +65,7 @@ func (s *OTelSink) NewLabel(name string) telemetry.Label {
 }
 
 func (s *OTelSink) ContextWithLabels(ctx context.Context, vals ...telemetry.LabelValue) (context.Context, error) {
-	var kvs []any
+	kvs := make([]any, 0, len(vals)*2)
 	for _, v := range vals {
 		if lv, ok := v.(*otelLabelValue); ok {
 			kvs = append(kvs, lv.kv.Key, lv.kv.Value.AsString())
@@ -74,79 +74,81 @@ func (s *OTelSink) ContextWithLabels(ctx context.Context, vals ...telemetry.Labe
 	return telemetry.KeyValuesToContext(ctx, kvs...), nil
 }
 
+// otelBase holds the pre-set attribute slice shared by all metric types.
+// With() returns a copy with additional attributes appended.
+type otelBase struct {
+	with []attribute.KeyValue
+}
+
+func (b otelBase) withAttrs(vals []telemetry.LabelValue) otelBase {
+	return otelBase{with: append(slices.Clone(b.with), toAttrs(vals)...)}
+}
+
+func (b otelBase) attrs(ctx context.Context) []attribute.KeyValue {
+	return append(slices.Clone(b.with), contextAttrs(ctx)...)
+}
+
 // --- otelCounter (Sum) ---
 
 type otelCounter struct {
-	c      otelmetric.Int64Counter
-	labels []telemetry.Label
-	with   []attribute.KeyValue
+	base otelBase
+	c    otelmetric.Int64Counter
 }
 
-func (m *otelCounter) Increment()                                     { m.Record(1) }
-func (m *otelCounter) Decrement()                                     { m.Record(-1) }
-func (m *otelCounter) Name() string                                   { return "" }
-func (m *otelCounter) Record(v float64)                               { m.RecordContext(context.Background(), v) }
+func (m *otelCounter) Increment()   { m.Record(1) }
+func (m *otelCounter) Decrement()   { m.Record(-1) }
+func (m *otelCounter) Name() string { return "" }
+func (m *otelCounter) Record(v float64) {
+	m.RecordContext(context.Background(), v)
+}
 func (m *otelCounter) RecordContext(ctx context.Context, v float64) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m.c.Add(ctx, int64(v), otelmetric.WithAttributes(m.attrs(ctx)...))
+	m.c.Add(ctx, int64(v), otelmetric.WithAttributes(m.base.attrs(ctx)...))
 }
 func (m *otelCounter) With(vals ...telemetry.LabelValue) telemetry.Metric {
-	c := *m
-	c.with = append(append([]attribute.KeyValue(nil), m.with...), toAttrs(vals)...)
-	return &c
-}
-
-func (m *otelCounter) attrs(ctx context.Context) []attribute.KeyValue {
-	// merge pre-set With() attrs + context-carried label KVPs
-	attrs := append([]attribute.KeyValue(nil), m.with...)
-	for _, kv := range contextAttrs(ctx) {
-		attrs = append(attrs, kv)
-	}
-	return attrs
+	return &otelCounter{base: m.base.withAttrs(vals), c: m.c}
 }
 
 // --- otelGauge (UpDownCounter) ---
 
 type otelGauge struct {
-	g      otelmetric.Int64UpDownCounter
-	labels []telemetry.Label
-	with   []attribute.KeyValue
+	base otelBase
+	g    otelmetric.Int64UpDownCounter
 }
 
-func (m *otelGauge) Increment()                                     { m.Record(1) }
-func (m *otelGauge) Decrement()                                     { m.Record(-1) }
-func (m *otelGauge) Name() string                                   { return "" }
-func (m *otelGauge) Record(v float64)                               { m.RecordContext(context.Background(), v) }
-func (m *otelGauge) RecordContext(ctx context.Context, v float64)   {
-	m.g.Add(ctx, int64(v), otelmetric.WithAttributes(m.with...))
+func (m *otelGauge) Increment()   { m.Record(1) }
+func (m *otelGauge) Decrement()   { m.Record(-1) }
+func (m *otelGauge) Name() string { return "" }
+func (m *otelGauge) Record(v float64) {
+	m.RecordContext(context.Background(), v)
+}
+func (m *otelGauge) RecordContext(ctx context.Context, v float64) {
+	m.g.Add(ctx, int64(v), otelmetric.WithAttributes(m.base.with...))
 }
 func (m *otelGauge) With(vals ...telemetry.LabelValue) telemetry.Metric {
-	c := *m
-	c.with = append(append([]attribute.KeyValue(nil), m.with...), toAttrs(vals)...)
-	return &c
+	return &otelGauge{base: m.base.withAttrs(vals), g: m.g}
 }
 
 // --- otelHistogram (Distribution) ---
 
 type otelHistogram struct {
-	h      otelmetric.Float64Histogram
-	labels []telemetry.Label
-	with   []attribute.KeyValue
+	base otelBase
+	h    otelmetric.Float64Histogram
 }
 
-func (m *otelHistogram) Increment()                                     { m.Record(1) }
-func (m *otelHistogram) Decrement()                                     { m.Record(-1) }
-func (m *otelHistogram) Name() string                                   { return "" }
-func (m *otelHistogram) Record(v float64)                               { m.RecordContext(context.Background(), v) }
-func (m *otelHistogram) RecordContext(ctx context.Context, v float64)   {
-	m.h.Record(ctx, v, otelmetric.WithAttributes(m.with...))
+func (m *otelHistogram) Increment()   { m.Record(1) }
+func (m *otelHistogram) Decrement()   { m.Record(-1) }
+func (m *otelHistogram) Name() string { return "" }
+func (m *otelHistogram) Record(v float64) {
+	m.RecordContext(context.Background(), v)
+}
+func (m *otelHistogram) RecordContext(ctx context.Context, v float64) {
+	m.h.Record(ctx, v, otelmetric.WithAttributes(m.base.with...))
 }
 func (m *otelHistogram) With(vals ...telemetry.LabelValue) telemetry.Metric {
-	c := *m
-	c.with = append(append([]attribute.KeyValue(nil), m.with...), toAttrs(vals)...)
-	return &c
+	return &otelHistogram{base: m.base.withAttrs(vals), h: m.h}
 }
 
 // --- otelLabel ---
@@ -170,20 +172,26 @@ func applyOpts(opts []telemetry.MetricOption) telemetry.MetricOptions {
 	return o
 }
 
-func toAttrs(vals []telemetry.LabelValue) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, len(vals))
-	for _, v := range vals {
-		if lv, ok := v.(*otelLabelValue); ok {
-			attrs = append(attrs, lv.kv)
+// toAttrs converts telemetry.Label / LabelValue slices to OTel attributes.
+// Accepts []telemetry.Label (from MetricOptions) by pulling the otelLabel key.
+func toAttrs(vals any) []attribute.KeyValue {
+	switch v := vals.(type) {
+	case []telemetry.LabelValue:
+		attrs := make([]attribute.KeyValue, 0, len(v))
+		for _, lv := range v {
+			if olv, ok := lv.(*otelLabelValue); ok {
+				attrs = append(attrs, olv.kv)
+			}
 		}
+		return attrs
+	case []telemetry.Label:
+		return nil // labels are dimensions; values come via With()
 	}
-	return attrs
+	return nil
 }
 
 // contextAttrs reads key-value pairs stored by KeyValuesToContext and
 // converts them to OTel attributes for metric recording.
-var contextAttrsPool = sync.Pool{New: func() any { return make([]attribute.KeyValue, 0, 8) }}
-
 func contextAttrs(ctx context.Context) []attribute.KeyValue {
 	if ctx == nil {
 		return nil
