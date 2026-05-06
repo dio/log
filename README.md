@@ -17,19 +17,19 @@ pattern breaks when you do that:
 
 ```go
 // Traditional — two separate calls
-log.Info("reserve success")       // silenced at Error level → gone
-reserveCounter.Add(ctx, 1)        // you have to remember to call this too
+log.Info("request handled", "route", route)   // silenced at Error level → gone
+requestCounter.Add(ctx, 1)                     // easy to forget
 
 // What actually happens in production when level=Error:
-log.Info("reserve success")       // ← silenced, nothing emitted
-// reserveCounter.Add forgotten   // ← alert never fires
+log.Info("request handled", "route", route)   // ← silenced
+// requestCounter.Add forgotten               // ← dashboard goes dark
 ```
 
 This library fixes it by making log and metric inseparable:
 
 ```go
 // One call — log + metric always together
-logger.Metric(reserveOK).Info("reserve success")
+logger.Metric(requests).Info("request handled", "route", route)
 // level=Error: log silent, metric still fires
 // level=Debug: both log and metric fire
 ```
@@ -61,7 +61,7 @@ import (
 )
 
 // meterProvider is your existing OTel MeterProvider (Prometheus, OTLP, etc.)
-sink := ziolog.NewOTelSink(meterProvider, "myservice")
+sink := ziolog.NewOTelSink(meterProvider, "myapp")
 telemetry.SetGlobalMetricSink(sink)
 scope.UseLogger(ziolog.New(slog.Default()))
 ```
@@ -72,20 +72,20 @@ No implementation dependency — library code only imports the telemetry interfa
 
 ```go
 var (
-    clusterLabel telemetry.Label
-    reserveOK    telemetry.Metric
-    reserveErrs  telemetry.Metric
+    routeLabel telemetry.Label
+    requests   telemetry.Metric
+    errors     telemetry.Metric
 )
 
 func init() {
     telemetry.ToGlobalMetricSink(func(ms telemetry.MetricSink) {
-        clusterLabel = ms.NewLabel("cluster")
-        reserveOK    = ms.NewSum("myservice_reserve_total",  "Successful reservations")
-        reserveErrs  = ms.NewSum("myservice_reserve_errors", "Reserve errors")
+        routeLabel = ms.NewLabel("route")
+        requests   = ms.NewSum("app_requests_total",  "Total requests handled")
+        errors     = ms.NewSum("app_errors_total",    "Total request errors")
     })
 }
 
-var log = scope.Register("myservice", "My service operations")
+var log = scope.Register("server", "HTTP server")
 ```
 
 ### 3. Log and emit metrics in one call
@@ -93,18 +93,18 @@ var log = scope.Register("myservice", "My service operations")
 ```go
 // Success path
 log.Context(ctx).
-    Metric(reserveOK.With(clusterLabel.Upsert("openai"))).
-    Info("reserve success", "user_id", userID, "tokens", n)
-// → slog:  level=INFO  msg="reserve success" scope=myservice user_id=alice tokens=1000
+    Metric(requests.With(routeLabel.Upsert("/api/v1/users"))).
+    Info("request handled", "method", "GET", "status", 200)
+// → slog:  level=INFO  msg="request handled" scope=server method=GET status=200
 //          trace_id=abc span_id=def  (injected from active OTel span)
-// → OTel:  myservice_reserve_total{cluster="openai"} += 1
+// → OTel:  app_requests_total{route="/api/v1/users"} += 1
 
 // Error path
 log.Context(ctx).
-    Metric(reserveErrs.With(clusterLabel.Upsert("openai"))).
-    Error("reserve failed", err, "user_id", userID)
-// → slog:  level=ERROR msg="reserve failed" ... err=context deadline exceeded
-// → OTel:  myservice_reserve_errors{cluster="openai"} += 1
+    Metric(errors.With(routeLabel.Upsert("/api/v1/users"))).
+    Error("request failed", err, "method", "GET")
+// → slog:  level=ERROR msg="request failed" ... err=context deadline exceeded
+// → OTel:  app_errors_total{route="/api/v1/users"} += 1
 ```
 
 ### OTel trace correlation
@@ -113,7 +113,7 @@ When a context with an active OTel span is attached via `.Context(ctx)`, `trace_
 and `span_id` are automatically injected into every log line — no manual extraction:
 
 ```
-level=INFO msg="reserve success" trace_id=c02b2a3a... span_id=d1449529... cluster=openai
+level=INFO msg="request handled" scope=server trace_id=c02b2a3a... span_id=d1449529... route=/api/v1/users
 ```
 
 The same `trace_id` appears in the OTel trace, making cross-signal correlation trivial.
@@ -143,7 +143,7 @@ Uses `MemSink` — no external deps, instant:
 sink := ziolog.NewMemSink()
 telemetry.SetGlobalMetricSink(sink)
 // ...
-assert.Equal(t, float64(1), sink.Snapshot()["myservice_reserve_total"])
+assert.Equal(t, float64(1), sink.Snapshot()["app_requests_total"])
 ```
 
 ### E2e tests
@@ -159,15 +159,15 @@ Assertions look like:
 
 ```go
 // Exact counter value + label
-val, ok := sink.WaitForCounter("myservice_reserve_total", "cluster", "openai", 1, 5*time.Second)
+val, ok := sink.WaitForCounter("app_requests_total", "route", "/api/v1/users", 1, 5*time.Second)
 
 // Log body + trace correlation
-rec, ok := sink.WaitForLog("reserve success", 5*time.Second)
+rec, ok := sink.WaitForLog("request handled", 5*time.Second)
 assert.Equal(t, traceID, rec.Attrs["trace_id"])
 
 // Span by trace ID
 span, ok := sink.WaitForSpan(traceID, 5*time.Second)
-assert.Equal(t, "quota.Reserve", span.Name)
+assert.Equal(t, "GET /api/v1/users", span.Name)
 ```
 
 ### Manual verification with otel-front

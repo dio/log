@@ -6,7 +6,7 @@ Why this library exists and the specific decisions it makes.
 
 ## The insight: most logs should be metrics
 
-A single log line that says `"reserve failed"` is rarely actionable on its own.
+A single log line that says `"request failed"` is rarely actionable on its own.
 One error in isolation could be a transient blip. What's actually actionable is
 when the **frequency** of that message changes — ten errors per second after days
 of zero is your alert condition.
@@ -25,8 +25,8 @@ fires. They serve different purposes but belong to the same event.
 The conventional approach is two separate calls:
 
 ```go
-log.Info("reserve success", "cluster", cluster)
-reserveCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("cluster", cluster)))
+log.Info("request handled", "route", route)
+requestCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("route", route)))
 ```
 
 This breaks in two ways:
@@ -104,7 +104,7 @@ When an OTel span is active in the context attached via `.Context(ctx)`, the log
 automatically injects `trace_id` and `span_id` into the log line:
 
 ```
-level=INFO msg="reserve success" trace_id=c02b2a3a... span_id=d1449529... cluster=openai
+level=INFO msg="request handled" trace_id=c02b2a3a... span_id=d1449529... route=/api/v1/users
 ```
 
 This links the log to its span without requiring a log aggregation pipeline to do
@@ -124,8 +124,8 @@ arrive at a collector. Two options:
 
 **Real collector (otel-front, Jaeger, etc.)** — requires Docker, has startup latency,
 and the REST API only exposes coarse queries (does metric name exist? does trace ID
-200?). No way to assert `myservice_reserve_total{cluster="openai"} == 1` without
-parsing the Prometheus text format.
+return 200?). No way to assert `app_requests_total{route="/api/v1/users"} == 1`
+without parsing the Prometheus text format.
 
 **In-process OTLP gRPC sink** — starts on a random port in `TestMain`, receives the
 same proto messages a real collector would, stores them in memory, exposes `WaitFor*`
