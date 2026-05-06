@@ -1,9 +1,8 @@
 // Command server demonstrates github.com/dio/log in a minimal HTTP server.
 //
 // Every request handler calls log.Metric(...).Info/Error — one call that emits
-// both a structured log line and an OTel counter. Metrics are scraped at /metrics
-// (Prometheus format). When the log level is raised to Error, Info logs disappear
-// but the request counter keeps incrementing.
+// both a structured log line and an OTel counter. When an OTel span is active,
+// trace_id and span_id are automatically injected into the log line.
 //
 // Run:
 //
@@ -12,9 +11,12 @@
 // Then in another terminal:
 //
 //	curl http://localhost:8080/hello
-//	curl http://localhost:8080/hello
 //	curl http://localhost:8080/fail
 //	curl http://localhost:9090/metrics   # see app_requests_total and app_errors_total
+//
+// Log output will include trace_id and span_id on every line:
+//
+//	level=INFO msg="request handled" scope=server trace_id=4bf92f35... span_id=00f067aa... route=/hello
 package main
 
 import (
@@ -35,14 +37,15 @@ import (
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // ---------------------------------------------------------------------------
-// Metrics — declared at package level, wired to backend in main via init().
-// Library code never imports the OTel SDK directly.
+// Metrics
 // ---------------------------------------------------------------------------
 
 var (
@@ -61,24 +64,38 @@ func init() {
 
 var logger = scope.Register("server", "HTTP server")
 
+// tracer is set in main after the TracerProvider is wired.
+var tracer trace.Tracer
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 func handleHello(w http.ResponseWriter, r *http.Request) {
-	logger.Context(r.Context()).
+	// Start a span — trace_id and span_id are injected into the log line below.
+	ctx, span := tracer.Start(r.Context(), "handleHello")
+	defer span.End()
+
+	logger.Context(ctx).
 		Metric(requests.With(routeLabel.Upsert(r.URL.Path))).
 		Info("request handled", "method", r.Method, "path", r.URL.Path)
+	// Output:
+	//   level=INFO msg="request handled" scope=server trace_id=4bf92f35... span_id=00f067aa... method=GET path=/hello
 
 	fmt.Fprintln(w, "hello")
 }
 
 func handleFail(w http.ResponseWriter, r *http.Request) {
+	ctx, span := tracer.Start(r.Context(), "handleFail")
+	defer span.End()
+
 	err := errors.New("something went wrong")
 
-	logger.Context(r.Context()).
+	logger.Context(ctx).
 		Metric(errors_.With(routeLabel.Upsert(r.URL.Path))).
 		Error("request failed", err, "method", r.Method, "path", r.URL.Path)
+	// Output:
+	//   level=ERROR msg="request failed" scope=server trace_id=4bf92f35... span_id=00f067aa... err=something went wrong
 
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
@@ -93,7 +110,7 @@ func main() {
 
 	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Wire OTel Prometheus metrics backend.
+	// OTel metrics: Prometheus scrape at /metrics.
 	res, _ := resource.New(ctx, resource.WithAttributes(semconv.ServiceName("example-server")))
 	promExp, err := otelprom.New()
 	if err != nil {
@@ -102,6 +119,15 @@ func main() {
 	}
 	mp := metric.NewMeterProvider(metric.WithReader(promExp), metric.WithResource(res))
 	defer mp.Shutdown(ctx)
+
+	// OTel traces: stdout exporter so trace_id/span_id are visible in log output.
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		// No exporter configured — spans stay local. In production, add an
+		// OTLP exporter here and they appear in Cloud Trace / Jaeger / Tempo.
+	)
+	defer tp.Shutdown(ctx)
+	tracer = tp.Tracer("example-server")
 
 	// Wire telemetry library.
 	sink := log.NewOTelSink(mp, "example")
@@ -114,12 +140,9 @@ func main() {
 	mux.HandleFunc("/hello", handleHello)
 	mux.HandleFunc("/fail",  handleFail)
 
-	appSrv := &http.Server{Addr: ":8080", Handler: mux}
-
-	// Admin server — /metrics only.
+	appSrv   := &http.Server{Addr: ":8080", Handler: mux}
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/metrics", promhttp.Handler())
-
 	adminSrv := &http.Server{Addr: ":9090", Handler: adminMux}
 
 	sl.Info("starting", "app", ":8080", "admin", ":9090")
